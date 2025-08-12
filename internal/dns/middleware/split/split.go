@@ -104,11 +104,22 @@ func (m *Middleware) shouldBypass(domain string) bool {
 		// Handle wildcard patterns
 		if strings.HasPrefix(bypassDomain, "*.") {
 			suffix := bypassDomain[wildcardPrefixLen:]
-			if strings.HasSuffix(domain, suffix) {
+			// Check if the domain ends with or contains the pattern
+			// This handles both direct matches and search-domain-appended queries
+			// e.g., *.cluster.local matches both:
+			//   - redis.svc.cluster.local
+			//   - redis.svc.cluster.local.hsd1.mi.comcast.net
+			if strings.HasSuffix(domain, suffix) || strings.Contains(domain, suffix+".") {
 				return true
 			}
-		} else if domain == bypassDomain || strings.HasSuffix(domain, "."+bypassDomain) {
-			return true
+		} else {
+			// Check for exact match, subdomain, or embedded match
+			// This handles search-domain-appended queries generically
+			if domain == bypassDomain || 
+			   strings.HasSuffix(domain, "."+bypassDomain) || 
+			   strings.Contains(domain, bypassDomain+".") {
+				return true
+			}
 		}
 	}
 

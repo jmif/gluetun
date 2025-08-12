@@ -116,7 +116,7 @@ func TestMiddleware_Wrap(t *testing.T) {
 	// This test focuses on the routing logic
 
 	m := &Middleware{
-		bypassDomains:  []string{"cluster.local", "*.internal"},
+		bypassDomains:  []string{"cluster.local", "*.internal", "*.example.local"},
 		bypassResolver: netip.MustParseAddr("10.0.0.53"),
 		bypassClient:   &dns.Client{}, // Initialize to prevent nil pointer
 		logger:         logger,
@@ -141,6 +141,16 @@ func TestMiddleware_Wrap(t *testing.T) {
 			name:           "external domain - calls next",
 			query:          "google.com.",
 			expectNextCall: true,
+		},
+		{
+			name:           "bypass domain with search domain appended",
+			query:          "redis.svc.cluster.local.hsd1.mi.comcast.net.",
+			expectNextCall: false, // should bypass because cluster.local is in the middle
+		},
+		{
+			name:           "wildcard match with search domain appended",
+			query:          "app.example.local.search.domain.com.",
+			expectNextCall: false, // should bypass because example.local is in the middle
 		},
 	}
 
