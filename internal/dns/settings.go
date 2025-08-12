@@ -3,6 +3,7 @@ package dns
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/qdm12/dns/v2/pkg/dot"
 	cachemiddleware "github.com/qdm12/dns/v2/pkg/middlewares/cache"
@@ -12,6 +13,7 @@ import (
 	"github.com/qdm12/dns/v2/pkg/provider"
 	"github.com/qdm12/dns/v2/pkg/server"
 	"github.com/qdm12/gluetun/internal/configuration/settings"
+	splitmiddleware "github.com/qdm12/gluetun/internal/dns/middleware/split"
 )
 
 func (l *Loop) GetSettings() (settings settings.DNS) { return l.state.GetSettings() }
@@ -23,7 +25,7 @@ func (l *Loop) SetSettings(ctx context.Context, settings settings.DNS) (
 }
 
 func buildDoTSettings(settings settings.DNS,
-	filter *mapfilter.Filter, logger Logger) (
+	filter *mapfilter.Filter, logger Logger, bypassConfig *BypassConfig) (
 	serverSettings server.Settings, err error,
 ) {
 	serverSettings.Logger = logger
@@ -46,6 +48,28 @@ func buildDoTSettings(settings settings.DNS,
 	serverSettings.Dialer, err = dot.New(dotSettings)
 	if err != nil {
 		return server.Settings{}, fmt.Errorf("creating DNS over TLS dialer: %w", err)
+	}
+
+	// Add DNS bypass middleware if configured
+	if bypassConfig != nil && bypassConfig.Resolver.IsValid() && len(bypassConfig.Domains) > 0 {
+		// Convert timeout from seconds to duration
+		var timeout time.Duration
+		if bypassConfig.Timeout > 0 {
+			timeout = time.Duration(bypassConfig.Timeout) * time.Second
+		}
+
+		splitMiddleware, err := splitmiddleware.New(splitmiddleware.Settings{
+			BypassResolver: bypassConfig.Resolver,
+			BypassDomains:  bypassConfig.Domains,
+			Timeout:        timeout,
+			Logger:         logger,
+		})
+		if err != nil {
+			return server.Settings{}, fmt.Errorf("creating DNS bypass middleware: %w", err)
+		}
+		serverSettings.Middlewares = append(serverSettings.Middlewares, splitMiddleware)
+		logger.Info(fmt.Sprintf("DNS bypass enabled for %d domains using resolver: %s",
+			len(bypassConfig.Domains), bypassConfig.Resolver))
 	}
 
 	if *settings.DoT.Caching {
