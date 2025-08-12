@@ -32,6 +32,7 @@ type Loop struct {
 	backoffTime   time.Duration
 	timeNow       func() time.Time
 	timeSince     func(time.Time) time.Duration
+	bypassConfig  *BypassConfig
 }
 
 const defaultBackoffTime = 10 * time.Second
@@ -53,6 +54,17 @@ func NewLoop(settings settings.DNS,
 		return nil, fmt.Errorf("creating map filter: %w", err)
 	}
 
+	// Configure DNS bypass for specified domains
+	var bypassConfig *BypassConfig
+	if len(settings.BypassDomains) > 0 {
+		bypassConfig, err = DetectBypassConfig(settings.BypassDomains, settings.BypassResolver)
+		if err != nil {
+			logger.Warn(fmt.Sprintf("failed to configure DNS bypass: %v", err))
+		} else {
+			logger.Info(fmt.Sprintf("DNS bypass configured for domains: %v", bypassConfig.Domains))
+		}
+	}
+
 	return &Loop{
 		statusManager: statusManager,
 		state:         state,
@@ -70,6 +82,7 @@ func NewLoop(settings settings.DNS,
 		backoffTime:   defaultBackoffTime,
 		timeNow:       time.Now,
 		timeSince:     time.Since,
+		bypassConfig:  bypassConfig,
 	}, nil
 }
 

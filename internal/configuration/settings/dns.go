@@ -31,6 +31,14 @@ type DNS struct {
 	// DOT contains settings to configure the DoT
 	// server.
 	DoT DoT
+	// BypassDomains are domains that should use the bypass resolver
+	// instead of the secure DoT server. This allows local/internal
+	// domains to work while keeping external DNS secure.
+	// Examples: cluster.local, consul.service, *.internal.corp
+	BypassDomains []string
+	// BypassResolver is the DNS server to use for bypass domains.
+	// If not set, it will be auto-detected from the original resolv.conf.
+	BypassResolver netip.Addr
 }
 
 func (d DNS) validate() (err error) {
@@ -47,6 +55,8 @@ func (d *DNS) Copy() (copied DNS) {
 		ServerAddress:  d.ServerAddress,
 		KeepNameserver: gosettings.CopyPointer(d.KeepNameserver),
 		DoT:            d.DoT.copy(),
+		BypassDomains:  gosettings.CopySlice(d.BypassDomains),
+		BypassResolver: d.BypassResolver,
 	}
 }
 
@@ -57,6 +67,8 @@ func (d *DNS) overrideWith(other DNS) {
 	d.ServerAddress = gosettings.OverrideWithValidator(d.ServerAddress, other.ServerAddress)
 	d.KeepNameserver = gosettings.OverrideWithPointer(d.KeepNameserver, other.KeepNameserver)
 	d.DoT.overrideWith(other.DoT)
+	d.BypassDomains = gosettings.OverrideWithSlice(d.BypassDomains, other.BypassDomains)
+	d.BypassResolver = gosettings.OverrideWithValidator(d.BypassResolver, other.BypassResolver)
 }
 
 func (d *DNS) setDefaults() {
@@ -64,6 +76,7 @@ func (d *DNS) setDefaults() {
 	d.ServerAddress = gosettings.DefaultValidator(d.ServerAddress, localhost)
 	d.KeepNameserver = gosettings.DefaultPointer(d.KeepNameserver, false)
 	d.DoT.setDefaults()
+	// BypassDomains and BypassResolver are optional and set at runtime if needed
 }
 
 func (d DNS) String() string {
@@ -77,6 +90,14 @@ func (d DNS) toLinesNode() (node *gotree.Node) {
 		return node
 	}
 	node.Appendf("DNS server address to use: %s", d.ServerAddress)
+
+	if len(d.BypassDomains) > 0 {
+		node.Appendf("Bypass domains: %v", d.BypassDomains)
+		if d.BypassResolver.IsValid() {
+			node.Appendf("Bypass resolver: %s", d.BypassResolver)
+		}
+	}
+
 	node.AppendNode(d.DoT.toLinesNode())
 	return node
 }
@@ -88,6 +109,13 @@ func (d *DNS) read(r *reader.Reader) (err error) {
 	}
 
 	d.KeepNameserver, err = r.BoolPtr("DNS_KEEP_NAMESERVER")
+	if err != nil {
+		return err
+	}
+
+	d.BypassDomains = r.CSV("DNS_BYPASS_DOMAINS")
+
+	d.BypassResolver, err = r.NetipAddr("DNS_BYPASS_RESOLVER")
 	if err != nil {
 		return err
 	}
