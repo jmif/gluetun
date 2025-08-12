@@ -36,6 +36,7 @@ type Middleware struct {
 type Settings struct {
 	BypassResolver netip.Addr
 	BypassDomains  []string
+	Timeout        time.Duration // Optional timeout override
 	Logger         interface {
 		Info(s string)
 		Error(s string)
@@ -52,12 +53,18 @@ func New(settings Settings) (*Middleware, error) {
 		return nil, ErrNoBypassDomains
 	}
 
+	// Use custom timeout if provided, otherwise use default
+	timeout := dnsTimeout
+	if settings.Timeout > 0 {
+		timeout = settings.Timeout
+	}
+
 	return &Middleware{
 		bypassResolver: settings.BypassResolver,
 		bypassDomains:  settings.BypassDomains,
 		bypassClient: &dns.Client{
 			Net:     "udp",
-			Timeout: dnsTimeout,
+			Timeout: timeout,
 		},
 		logger: settings.Logger,
 	}, nil

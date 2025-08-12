@@ -3,6 +3,7 @@ package dns
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/qdm12/dns/v2/pkg/dot"
 	cachemiddleware "github.com/qdm12/dns/v2/pkg/middlewares/cache"
@@ -51,17 +52,24 @@ func buildDoTSettings(settings settings.DNS,
 
 	// Add DNS bypass middleware if configured
 	if bypassConfig != nil && bypassConfig.Resolver.IsValid() && len(bypassConfig.Domains) > 0 {
+		// Convert timeout from seconds to duration
+		var timeout time.Duration
+		if bypassConfig.Timeout > 0 {
+			timeout = time.Duration(bypassConfig.Timeout) * time.Second
+		}
+
 		splitMiddleware, err := splitmiddleware.New(splitmiddleware.Settings{
 			BypassResolver: bypassConfig.Resolver,
 			BypassDomains:  bypassConfig.Domains,
+			Timeout:        timeout,
 			Logger:         logger,
 		})
 		if err != nil {
 			return server.Settings{}, fmt.Errorf("creating DNS bypass middleware: %w", err)
 		}
 		serverSettings.Middlewares = append(serverSettings.Middlewares, splitMiddleware)
-		logger.Info(fmt.Sprintf("DNS bypass enabled for domains: %v using resolver: %s",
-			bypassConfig.Domains, bypassConfig.Resolver))
+		logger.Info(fmt.Sprintf("DNS bypass enabled for %d domains using resolver: %s (ndots:%d)",
+			len(bypassConfig.Domains), bypassConfig.Resolver, bypassConfig.Ndots))
 	}
 
 	if *settings.DoT.Caching {

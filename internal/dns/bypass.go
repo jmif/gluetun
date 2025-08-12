@@ -1,21 +1,23 @@
 package dns
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
 	"net/netip"
-	"os"
 	"strings"
-)
 
-const minResolverFields = 2
+	"github.com/miekg/dns"
+)
 
 var ErrNoBypassResolver = errors.New("no bypass resolver could be determined")
 
 type BypassConfig struct {
-	Resolver netip.Addr
-	Domains  []string
+	Resolver      netip.Addr
+	Domains       []string
+	SearchDomains []string // Search domains from resolv.conf
+	Ndots         int      // Ndots value from resolv.conf (important for K8s)
+	Timeout       int      // Timeout in seconds from resolv.conf
+	Attempts      int      // Number of attempts from resolv.conf
 }
 
 func DetectBypassConfig(userDomains []string, userResolver netip.Addr) (*BypassConfig, error) {
@@ -30,13 +32,38 @@ func DetectBypassConfig(userDomains []string, userResolver netip.Addr) (*BypassC
 
 	// If no resolver specified, try to detect from original resolv.conf
 	if !config.Resolver.IsValid() {
-		resolvConfig, err := parseResolvConfSimple("/etc/resolv.conf")
+		// Use miekg/dns built-in resolv.conf parser
+		clientConfig, err := dns.ClientConfigFromFile("/etc/resolv.conf")
 		if err != nil {
-			return nil, fmt.Errorf("detecting bypass resolver: %w", err)
+			return nil, fmt.Errorf("parsing resolv.conf: %w", err)
 		}
-		if len(resolvConfig.Nameservers) > 0 {
-			config.Resolver = resolvConfig.Nameservers[0]
+
+		// Use the first nameserver if available
+		if len(clientConfig.Servers) > 0 {
+			addr, err := netip.ParseAddr(clientConfig.Servers[0])
+			if err == nil {
+				config.Resolver = addr
+			}
 		}
+
+		// Also capture search domains from resolv.conf
+		// These are domains that get appended to unqualified names
+		if len(clientConfig.Search) > 0 {
+			config.SearchDomains = clientConfig.Search
+			// Optionally add search domains to bypass list
+			// This ensures local domain searches work correctly
+			for _, searchDomain := range clientConfig.Search {
+				normalized := strings.TrimSpace(strings.ToLower(searchDomain))
+				if normalized != "" && !containsDomain(config.Domains, normalized) {
+					config.Domains = append(config.Domains, normalized)
+				}
+			}
+		}
+
+		// Capture other important resolv.conf settings
+		config.Ndots = clientConfig.Ndots       // Number of dots to trigger absolute lookup
+		config.Timeout = clientConfig.Timeout   // Query timeout
+		config.Attempts = clientConfig.Attempts // Number of attempts
 	}
 
 	if !config.Resolver.IsValid() {
@@ -59,42 +86,11 @@ func normalizeDomains(domains []string) []string {
 	return normalized
 }
 
-type resolvConfigSimple struct {
-	Nameservers []netip.Addr
-}
-
-func parseResolvConfSimple(path string) (*resolvConfigSimple, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("opening file: %w", err)
-	}
-	defer file.Close()
-
-	config := &resolvConfigSimple{}
-	scanner := bufio.NewScanner(file)
-
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if strings.HasPrefix(line, "#") {
-			continue
-		}
-
-		fields := strings.Fields(line)
-		if len(fields) < minResolverFields {
-			continue
-		}
-
-		if fields[0] == "nameserver" {
-			addr, err := netip.ParseAddr(fields[1])
-			if err == nil {
-				config.Nameservers = append(config.Nameservers, addr)
-			}
+func containsDomain(domains []string, domain string) bool {
+	for _, d := range domains {
+		if d == domain {
+			return true
 		}
 	}
-
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("scanning file: %w", err)
-	}
-
-	return config, nil
+	return false
 }
