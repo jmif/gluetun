@@ -12,12 +12,12 @@ import (
 var ErrNoBypassResolver = errors.New("no bypass resolver could be determined")
 
 type BypassConfig struct {
-	Resolver      netip.Addr
-	Domains       []string
-	SearchDomains []string // Search domains from resolv.conf
-	Ndots         int      // Ndots value from resolv.conf (important for K8s)
-	Timeout       int      // Timeout in seconds from resolv.conf
-	Attempts      int      // Number of attempts from resolv.conf
+	Resolver      netip.Addr   // DNS server to use for bypass domains
+	Domains       []string     // User-specified domains to bypass DoT
+	SearchDomains []string     // Search domains from resolv.conf (informational only)
+	Ndots         int          // Ndots value from resolv.conf
+	Timeout       int          // Timeout in seconds from resolv.conf
+	Attempts      int          // Number of attempts from resolv.conf
 }
 
 func DetectBypassConfig(userDomains []string, userResolver netip.Addr) (*BypassConfig, error) {
@@ -46,18 +46,10 @@ func DetectBypassConfig(userDomains []string, userResolver netip.Addr) (*BypassC
 			}
 		}
 
-		// Also capture search domains from resolv.conf
-		// These are domains that get appended to unqualified names
+		// Capture search domains from resolv.conf (for informational purposes)
+		// but DO NOT automatically add them to bypass list
 		if len(clientConfig.Search) > 0 {
 			config.SearchDomains = clientConfig.Search
-			// Optionally add search domains to bypass list
-			// This ensures local domain searches work correctly
-			for _, searchDomain := range clientConfig.Search {
-				normalized := strings.TrimSpace(strings.ToLower(searchDomain))
-				if normalized != "" && !containsDomain(config.Domains, normalized) {
-					config.Domains = append(config.Domains, normalized)
-				}
-			}
 		}
 
 		// Capture other important resolv.conf settings
@@ -84,13 +76,4 @@ func normalizeDomains(domains []string) []string {
 		}
 	}
 	return normalized
-}
-
-func containsDomain(domains []string, domain string) bool {
-	for _, d := range domains {
-		if d == domain {
-			return true
-		}
-	}
-	return false
 }

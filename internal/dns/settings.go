@@ -68,8 +68,8 @@ func buildDoTSettings(settings settings.DNS,
 			return server.Settings{}, fmt.Errorf("creating DNS bypass middleware: %w", err)
 		}
 		serverSettings.Middlewares = append(serverSettings.Middlewares, splitMiddleware)
-		logger.Info(fmt.Sprintf("DNS bypass enabled for %d domains using resolver: %s (ndots:%d)",
-			len(bypassConfig.Domains), bypassConfig.Resolver, bypassConfig.Ndots))
+		logger.Info(fmt.Sprintf("DNS bypass enabled for %d domains using resolver: %s",
+			len(bypassConfig.Domains), bypassConfig.Resolver))
 	}
 
 	if *settings.DoT.Caching {
